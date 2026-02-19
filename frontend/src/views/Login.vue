@@ -71,6 +71,7 @@ const handleLogin = () => {
         // 把 Token 存起来，以后要用
         localStorage.setItem('token', res.data.token)
         localStorage.setItem('username', res.data.username)
+        localStorage.setItem('user_id', res.data.user_id)
 
         //跳转主页
         await router.push('/dashboard')

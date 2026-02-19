@@ -93,7 +93,7 @@ def get_company_name(card):
 
 # ========== 核心任务 ==========
 
-def run_spider_task(keyword, target_pages=1):
+def run_spider_task(keyword, city=None, target_pages=1):
     """
     keyword: 搜索关键词
     target_pages: 期望获取的新数据页数 (每页按50条计算)
@@ -117,7 +117,13 @@ def run_spider_task(keyword, target_pages=1):
     spider_status['current_page'] = 0
     spider_status['log'] = f"正在启动浏览器搜索: {keyword}..."
 
-    print(f"🕷️ 启动爬虫任务: {keyword}")
+    final_keyword = keyword
+    if city:
+        # 如果用户选了城市，搜索词变成 "上海 Python"
+        # 51job 的搜索框非常智能，这样搜出来的 99% 都是上海的岗位
+        final_keyword = f"{city} {keyword}"
+
+    print(f"🕷️ 启动爬虫任务: {final_keyword}")
     print(f"🎯 目标: 获取 {target_pages} 页新数据 (约 {TARGET_NEW_JOBS} 条)")
 
     co = ChromiumOptions()
@@ -130,7 +136,7 @@ def run_spider_task(keyword, target_pages=1):
     current_page_num = 1  # 当前正在爬取的页码
 
     try:
-        search_url = f'https://we.51job.com/pc/search?keyword={keyword}'
+        search_url = f'https://we.51job.com/pc/search?keyword={final_keyword}'
         page.get(search_url)
 
         try:

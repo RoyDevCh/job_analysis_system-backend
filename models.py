@@ -60,12 +60,12 @@ class BrowseHistory(db.Model):
 # 6. 分析结果缓存表 (AnalysisResult) - 性能优化
 # 作用：每天半夜算一次全站的平均薪资、词云数据，存到这里。
 # 前端请求时，直接从这里取JSON，速度快100倍。
-class AnalysisResult(db.Model):
-    __tablename__ = 'analysis_result'
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    type = db.Column(db.String(50))  # 类型：例如 'city_salary_avg', 'skill_cloud'
-    result_json = db.Column(db.Text)  # 存算好的 JSON 字符串
-    create_time = db.Column(db.DateTime, default=datetime.now)
+# class AnalysisResult(db.Model):
+#     __tablename__ = 'analysis_result'
+#     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+#     type = db.Column(db.String(50))  # 类型：例如 'city_salary_avg', 'skill_cloud'
+#     result_json = db.Column(db.Text)  # 存算好的 JSON 字符串
+#     create_time = db.Column(db.DateTime, default=datetime.now)
 
 
 

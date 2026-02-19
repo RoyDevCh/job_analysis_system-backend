@@ -1,6 +1,6 @@
 from threading import Thread
 from flask import Flask, jsonify, request
-from models import db, Job, User
+from models import db, Job, User, UserProfile, BrowseHistory
 import jwt
 import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -85,7 +85,6 @@ def get_city_analysis():
         for j_city, j_salary in jobs:
             if not j_city: continue
 
-            # 🔥🔥🔥 核心修改在这里 🔥🔥🔥
             # 1. 把各种奇怪的分隔符 (·, 空格, _) 都替换成减号 -
             # 2. 然后再用 - 分割，取第一个
             # 例子: "武汉·东湖" -> "武汉-东湖" -> "武汉"
@@ -153,12 +152,46 @@ def parse_edu_level(edu_text):
 # 推荐接口
 @app.route('/api/recommend', methods=['GET'])
 def recommend_jobs():
+    user_id = request.args.get('user_id', '')
     keyword = request.args.get('keyword', '').strip()
     target_city = request.args.get('city', '')
     target_skill = request.args.get('skill', '')
     target_salary = request.args.get('salary', 0, type=int)
     target_exp = request.args.get('experience', '')
     target_edu = request.args.get('education', '')
+
+    # 如果用户登录了，把他的搜索偏好存入 UserProfile 表
+    if user_id:
+        try:
+            # 1. 先查有没有这个人的画像
+            profile = UserProfile.query.filter_by(user_id=user_id).first()
+
+            # 2. 如果没有，就新建一个
+            if not profile:
+                profile = UserProfile(user_id=user_id)
+                db.session.add(profile)
+
+            # 3. 智能更新 (只有当用户传了值的时候才更新，传空值不覆盖原有的偏好)
+            # 这样用户如果只搜了 "Python" 没选城市，之前的 "上海" 偏好还会保留
+            if target_city:
+                profile.expect_city = target_city
+
+            if target_skill:
+                # 简单的追加或覆盖逻辑，这里演示覆盖，代表“最新兴趣”
+                profile.expect_skills = target_skill
+
+            if target_salary and target_salary > 0:
+                profile.expect_salary = target_salary
+
+            # 更新最后修改时间
+            profile.update_time = datetime.now()
+
+            db.session.commit()
+            # print(f"✅ 画像已动态修正: {profile.expect_city} | {profile.expect_skills}")
+
+        except Exception as e:
+            db.session.rollback()
+            # print(f"画像更新忽略错误: {e}")
 
     try:
         query = Job.query
@@ -238,28 +271,71 @@ def get_city_list():
 
 
 @app.route('/api/skills', methods=['GET'])
+@app.route('/api/skills', methods=['GET'])
 def skill_list():
-    all_jobs = Job.query.all()
-    skill_set = set()
-    for job in all_jobs:
-        if job.skills:
-            skill_set.update([s.strip() for s in job.skills.replace('，', ',').split(',')])
-    return jsonify({"code": 200, "msg": "ok", "data": sorted(skill_set)})
+    try:
+        all_jobs = Job.query.all()
+        skill_set = set()
+
+        # 定义“福利/非技能”黑名单
+        # 只要包含这些字，统统不要
+        blacklist_keywords = [
+            "险", "金", "假", "补", "休", "餐", "房", "游", "检", "节", "包",
+            "奖", "红", "薪", "权", "票", "晋", "训", "队", "车", "费",
+            "医疗", "子女", "弹性", "氛围", "扁平", "零食", "下午茶", "生日",
+            "五险", "社保", "双休", "周末", "全勤", "年底", "年终", "定期",
+            "免费", "交通", "通讯", "采暖", "高温", "带薪", "无责任", "底薪",
+            "提成", "绩效", "补助", "津贴", "福利", "待遇", "环境", "老板",
+            "nice", "NICE", "Nice", "美女", "帅哥", "团建", "旅游"
+        ]
+
+        for job in all_jobs:
+            if job.skills:
+                # 拆分技能
+                raw_skills = [s.strip() for s in job.skills.replace('，', ',').split(',')]
+
+                for s in raw_skills:
+                    # 1. 长度过滤 (太长的通常是废话，比如 '团队氛围好')
+                    # 技能通常很短，比如 'Java', 'Spring Boot'
+                    if len(s) > 15 or len(s) < 2:
+                        continue
+
+                    # 2. 关键词黑名单过滤
+                    is_bad = False
+                    for bad in blacklist_keywords:
+                        if bad in s:
+                            is_bad = True
+                            break
+
+                    if not is_bad:
+
+                        skill_set.add(s.title())
+
+        # 排序后返回
+        return jsonify({"code": 200, "msg": "ok", "data": sorted(list(skill_set))})
+
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"查询失败: {str(e)}", "data": []})
 
 
 @app.route('/api/spider/start', methods=['POST'])
 def start_spider_api():
     data = request.json
     keyword = data.get('keyword', '')
+    city = data.get('city', '')  # 🔥 接收城市参数
+
     if not keyword: return jsonify({"code": 400, "msg": "无关键字"})
     if spider_status['is_running']: return jsonify({"code": 400, "msg": "运行中"})
 
-    def thread_task(app_context, kw):
+    def thread_task(app_context, kw, ct):  # 🔥 增加参数 ct (city)
         with app_context:
-            run_spider_task(kw, target_pages=1)
+            # 传递给爬虫函数
+            run_spider_task(kw, ct, target_pages=2)
 
-    t = Thread(target=thread_task, args=(app.app_context(), keyword))
+    # 启动线程时带上 city
+    t = Thread(target=thread_task, args=(app.app_context(), keyword, city))
     t.start()
+
     return jsonify({"code": 200, "msg": "started"})
 
 
@@ -294,9 +370,35 @@ def login():
     if user and check_password_hash(user.password, password):
         token = jwt.encode({'user_id': user.id, 'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)},
                            app.config['SECRET_KEY'], algorithm='HS256')
-        return jsonify({"code": 200, "msg": "ok", "token": token, "username": username})
+        return jsonify({
+            "code": 200,
+            "msg": "ok",
+            "token": token,
+            "username": username,
+            "user_id": user.id
+        })
     return jsonify({"code": 401, "msg": "error"})
 
+
+# “记录浏览历史”接口
+@app.route('/api/history', methods=['POST'])
+def add_history():
+    """前端点击卡片时调用此接口"""
+    data = request.json
+    user_id = data.get('user_id')
+    job_id = data.get('job_id')
+
+    if not user_id or not job_id:
+        return jsonify({"code": 400, "msg": "参数错误"})
+
+    try:
+        # 记录一条历史
+        history = BrowseHistory(user_id=user_id, job_id=job_id, view_time=datetime.datetime.now())
+        db.session.add(history)
+        db.session.commit()
+        return jsonify({"code": 200, "msg": "已记录浏览历史"})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)})
 
 if __name__ == '__main__':
     # 注意：这里也开启了 debug 模式
